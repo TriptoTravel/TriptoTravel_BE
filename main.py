@@ -1,20 +1,10 @@
 from fastapi import FastAPI
-from database import supabase, Base
-from sqlalchemy import create_engine, MetaData, text
-import os
-from dotenv import load_dotenv
+from sqlalchemy import text
+from database import engine, create_tables
 import uvicorn
 
-load_dotenv()
-db_url = os.getenv("DATABASE_URL")
-
-#스키마 이름 지정
-metadata = MetaData(schema="trip_to_travel")
-engine = create_engine(db_url)
-
 # 테이블 생성
-Base.metadata = metadata
-Base.metadata.create_all(bind=engine)
+create_tables()
 
 app = FastAPI()
 
@@ -26,4 +16,4 @@ def read_root():
     return data
 
 if __name__ == "__main__":
-     uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
