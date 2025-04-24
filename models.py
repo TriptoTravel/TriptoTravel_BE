@@ -7,7 +7,7 @@ class Travelogue(Base):
     __tablename__ = 'travelogue'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     style_category = Column(Integer)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default_factory=datetime.now)
 
 
 class Purpose(Base):
@@ -26,7 +26,7 @@ class TravelQuestionResponse(Base):
 
 class TravelogueImage(Base):
     __tablename__ = 'travelogue_image'
-    travelogue_id = Column(Integer, ForeignKey('travelogue.id'), primary_key=True, autoincrement=True, nullable=False)
+    travelogue_id = Column(Integer, ForeignKey('travelogue.id'), primary_key=True, nullable=False)
     image_id = Column(Integer, ForeignKey('image.id'), primary_key=True, nullable=False)
 
 
@@ -60,7 +60,7 @@ class Metadata(Base):
     __tablename__ = 'metadata'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     image_id = Column(Integer, ForeignKey('image.id'), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime)
     location = Column(String)
 
 
