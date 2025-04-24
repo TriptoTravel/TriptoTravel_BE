@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from sqlalchemy import text
-from database import engine, create_tables
+from database import engine
 import uvicorn
+import models
 
-# 테이블 생성
-create_tables()
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 

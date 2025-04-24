@@ -17,7 +17,3 @@ db_url = os.getenv("DATABASE_URL")
 engine = create_engine(db_url)
 metadata = MetaData(schema="trip_to_travel")
 Base = declarative_base(metadata=metadata)
-
-# 테이블 생성 함수
-def create_tables():
-    Base.metadata.create_all(bind=engine)
