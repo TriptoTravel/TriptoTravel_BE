@@ -1,13 +1,11 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime
-from datetime import datetime
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, func
 from database import Base
-from sqlalchemy.orm import relationship
 
 class Travelogue(Base):
     __tablename__ = 'travelogue'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     style_category = Column(Integer)
-    created_at = Column(DateTime, default_factory=datetime.now)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class Purpose(Base):
