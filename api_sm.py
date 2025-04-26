@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from datetime import datetime
 from database import SessionLocal
@@ -69,3 +69,19 @@ async def create_travelogue(db: db_dependency):
     db.commit()
     db.refresh(db_travelogue)
     return db_travelogue
+
+
+@router.patch(
+    "/api/travelogue/{travelogue_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="여행기 튜플 수정",
+    description="지정된 여행기의 style_category를 업데이트합니다."
+)
+async def update_travelogue(travelogue_id: int, update: TravelogueUpdate, db: db_dependency):
+    db_travelogue = db.query(Travelogue).filter(Travelogue.id == travelogue_id).first()
+    if not db_travelogue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"error": "Travelogue not found"})
+    db_travelogue.style_category = update.style_category
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
