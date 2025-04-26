@@ -54,3 +54,18 @@ async def get_travelogue(travelogue_id: int, db: db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail={"error": "Travelogue not found"})
     return db_travelogue
+
+
+@router.post(
+    "/api/travelogue",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TravelogueResponse,
+    summary="여행기 튜플 생성",
+    description="새로운 여행기 튜플을 생성합니다. style_category의 초기값은 Null로 생성됩니다."
+)
+async def create_travelogue(db: db_dependency):
+    db_travelogue = Travelogue()
+    db.add(db_travelogue)
+    db.commit()
+    db.refresh(db_travelogue)
+    return db_travelogue
