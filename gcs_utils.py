@@ -1,6 +1,7 @@
 from google.cloud import storage
 from typing import Optional
 from google.oauth2 import service_account
+from datetime import timedelta
 import os
 
 BUCKET_NAME = "trip_to_travel_bucket"
@@ -34,3 +35,13 @@ def delete_image_from_gcs(file_name: str) -> bool:
         return True
     else:
         return False
+    
+def generate_signed_url(image_uri: str, expiration: int = 300) -> str:
+    file_name = image_uri.split(f"gs://{BUCKET_NAME}/")[-1]
+    print(file_name)
+    blob = bucket.blob(file_name)
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(seconds=expiration),
+        method="GET"
+    )

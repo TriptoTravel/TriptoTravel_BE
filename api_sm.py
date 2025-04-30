@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from models import Travelogue, Image, TravelogueImage
 from starlette import status
 from sqlalchemy.exc import IntegrityError
-from gcs_utils import upload_image_to_gcs, delete_image_from_gcs
+from gcs_utils import upload_image_to_gcs, delete_image_from_gcs, generate_signed_url
 
 router = APIRouter()
 
@@ -165,5 +165,43 @@ async def create_image(db:db_dependency, travelogue_id: int = Form(...), images:
             delete_image_from_gcs(file_name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+
+@router.get(
+    "/api/image/{travelogue_id}/activated",
+    status_code=status.HTTP_200_OK,
+    summary="is_in_travelogue가 true인 image url 및 draft 확인",
+    description="travelogue_id에 해당하는 image 튜플 중 is_in_travelogue가 true인 image의 Signed URL과 draft를 확인합니다."
+)
+async def get_used_image_url_and_draft(db: db_dependency, travelogue_id: int):
+    mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
+    if not mappings:
+        raise HTTPException(  
+                status_code=status.HTTP_404_NOT_FOUND,  
+                detail=f"Travelogue id : {travelogue_id} not found"  
+            )
+    
+    try:
+        image_ids = [mapping.image_id for mapping in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids),
+            Image.is_in_travelogue == True
+        ).all()
+
+        result = []
+        for image in images:
+            signed_url = generate_signed_url(image.uri)
+
+            result.append({
+                "id": image.id,
+                "image_url": signed_url,
+                "draft": image.draft
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
             detail=f"Unexpected error: {str(e)}"
         )
