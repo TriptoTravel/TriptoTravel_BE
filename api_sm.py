@@ -4,9 +4,10 @@ from datetime import datetime
 from database import SessionLocal
 from typing import Annotated, List
 from sqlalchemy.orm import Session
-from models import Travelogue, Image, TravelogueImage
+from models import Travelogue, Image, TravelogueImage, Metadata
 from starlette import status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 from gcs_utils import upload_image_to_gcs, delete_image_from_gcs, generate_signed_url
 
 router = APIRouter()
@@ -200,6 +201,56 @@ async def get_used_image_url_and_draft(db: db_dependency, travelogue_id: int):
                 "draft": image.draft
             })
         return result
+    except Exception as e:
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+
+
+class MetadataResponse(BaseModel):
+    id: int
+    image_id: int
+    created_at: datetime | None = None
+    location: str | None = None
+
+
+@router.get(
+    "/api/image/{travelogue_id}/none/metadata",
+    status_code=status.HTTP_200_OK,
+    response_model=List[MetadataResponse],
+    summary="메타데이터가 없는 이미지 확인",
+    description="travelogue_id가 true인 이미지 중 메타데이터 누락 사항이 있는 것을 확인합니다."
+)
+async def get_none_metadata_image(db: db_dependency, travelogue_id: int):
+    mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
+    if not mappings:
+        raise HTTPException(  
+                status_code=status.HTTP_404_NOT_FOUND,  
+                detail=f"Travelogue id : {travelogue_id} not found"  
+            )
+    
+    try:
+        image_ids = [mapping.image_id for mapping in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids),
+            Image.is_in_travelogue == True
+        ).all()
+        
+        image_id_list = [image.id for image in images]
+        if not image_id_list:
+            return []
+
+        metadatas = db.query(Metadata).filter(
+            Metadata.image_id.in_(image_id_list),
+            or_(
+                Metadata.created_at == None,
+                Metadata.location == None
+            )
+        ).all()
+
+        return metadatas
     except Exception as e:
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
