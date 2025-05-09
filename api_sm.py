@@ -344,7 +344,7 @@ class EachImageQuestionResponse(BaseModel):
     emotion_list: List[EmotionResponse]
 
 
-@router.patch(
+@router.post(
     "/api/image/{image_id}/question",
     response_model=EachImageQuestionResponse,
     status_code=status.HTTP_201_CREATED,
