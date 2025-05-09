@@ -170,8 +170,17 @@ async def create_image(db:db_dependency, travelogue_id: int = Form(...), images:
         )
 
 
+class ActivatedResponse(BaseModel):
+    id: int
+    image_url: str
+    draft: str | None = None
+
+class ActivatedListResponse(BaseModel):
+    image_draft_list: List[ActivatedResponse]
+
 @router.get(
     "/api/image/{travelogue_id}/activated",
+    response_model=ActivatedListResponse,
     status_code=status.HTTP_200_OK,
     summary="is_in_travelogue가 true인 image url 및 draft 확인",
     description="travelogue_id에 해당하는 image 튜플 중 is_in_travelogue가 true인 image의 Signed URL과 draft를 확인합니다."
@@ -200,7 +209,7 @@ async def get_used_image_url_and_draft(db: db_dependency, travelogue_id: int):
                 "image_url": signed_url,
                 "draft": image.draft
             })
-        return result
+        return {"image_draft_list": result}
     except Exception as e:
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
