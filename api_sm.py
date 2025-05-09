@@ -256,3 +256,33 @@ async def get_none_metadata_image(db: db_dependency, travelogue_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
             detail=f"Unexpected error: {str(e)}"
         )
+    
+
+
+class MetadataUpdate(BaseModel):
+    created_at: datetime
+    location: str
+
+
+@router.patch(
+    "/api/image/{image_id}/metadata",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="메타데이터 튜플 수정",
+    description="지정된 메타데이터의 created_at, location을 업데이트합니다."
+)
+async def update_metadata(db: db_dependency, update: MetadataUpdate, image_id: int):
+    db_metadata = db.query(Metadata).filter(Metadata.image_id == image_id).first()
+    if not db_metadata:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"error": "Metadata not found"})
+    db_metadata.created_at = update.created_at
+    db_metadata.location = update.location
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
