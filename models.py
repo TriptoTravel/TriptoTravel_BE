@@ -19,7 +19,7 @@ class TravelQuestionResponse(Base):
     __tablename__ = 'travel_question_response'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     travelogue_id = Column(Integer, ForeignKey('travelogue.id'), nullable=False)
-    who = Column(String)
+    who_category = Column(Integer)
 
 
 class TravelogueImage(Base):
@@ -76,3 +76,8 @@ class EmotionCategory(Base):
     __tablename__ = 'emotion_category'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     emotion = Column(String, nullable=False)
+
+class WhoCategory(Base):
+    __tablename__ = 'who_category'
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    who = Column(String, nullable=False)
