@@ -4,7 +4,7 @@ from datetime import datetime
 from database import SessionLocal
 from typing import Annotated, List
 from sqlalchemy.orm import Session
-from models import Travelogue, Image, TravelogueImage, Metadata
+from models import Travelogue, Image, TravelogueImage, Metadata, ImageQuestionResponse, Emotion
 from starlette import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
@@ -314,3 +314,58 @@ async def update_final(db: db_dependency, image_id: int, final: FinalRequest):
             detail=f"Unexpected error: {str(e)}"
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
+class ImageQuestionRequest(BaseModel):
+    how: str
+    emotion: List[int]
+
+
+class EmotionResponse(BaseModel):
+    id: int
+    question_response_id: int
+    emotion_category: int
+
+
+class EachImageQuestionResponse(BaseModel):
+    image_id: int
+    how: str
+    emotion_list: List[EmotionResponse]
+
+
+@router.patch(
+    "/api/image/{image_id}/question",
+    response_model=EachImageQuestionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="이미지에 대한 사전 질문 응답 튜플 생성",
+    description="개별 이미지에 대한 사전 질문 응답을 emotion, image_question_response 테이블에 저장합니다."
+)
+async def create_image_question_response(db: db_dependency, image_id: int, request: ImageQuestionRequest):
+    if not db.query(Image).filter(Image.id == image_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"error": "Travelogue not found"})
+    try:
+        db_image_question_response = ImageQuestionResponse(image_id=image_id, how=request.how)
+        db.add(db_image_question_response)
+        db.flush()
+
+        emotion_list = []
+        for e in request.emotion:
+            db_emotion = Emotion(question_response_id=db_image_question_response.id, emotion_category=e)
+            db.add(db_emotion)
+            db.flush()
+            emotion_list.append({
+                "id": db_emotion.id,
+                "question_response_id": db_emotion.question_response_id,
+                "emotion_category": db_emotion.emotion_category
+            })
+        db.commit()
+
+        return {"image_id": image_id, "how": request.how, "emotion_list": emotion_list}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
+            detail=f"Unexpected error: {str(e)}"
+        )
