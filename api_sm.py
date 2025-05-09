@@ -4,7 +4,7 @@ from datetime import datetime
 from database import SessionLocal
 from typing import Annotated, List
 from sqlalchemy.orm import Session
-from models import Travelogue, Image, TravelogueImage, Metadata, ImageQuestionResponse, Emotion
+from models import *
 from starlette import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
@@ -170,8 +170,17 @@ async def create_image(db:db_dependency, travelogue_id: int = Form(...), images:
         )
 
 
+class ActivatedResponse(BaseModel):
+    id: int
+    image_url: str
+    draft: str | None = None
+
+class ActivatedListResponse(BaseModel):
+    image_draft_list: List[ActivatedResponse]
+
 @router.get(
     "/api/image/{travelogue_id}/activated",
+    response_model=ActivatedListResponse,
     status_code=status.HTTP_200_OK,
     summary="is_in_travelogue가 true인 image url 및 draft 확인",
     description="travelogue_id에 해당하는 image 튜플 중 is_in_travelogue가 true인 image의 Signed URL과 draft를 확인합니다."
@@ -200,7 +209,7 @@ async def get_used_image_url_and_draft(db: db_dependency, travelogue_id: int):
                 "image_url": signed_url,
                 "draft": image.draft
             })
-        return result
+        return {"image_draft_list": result}
     except Exception as e:
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
@@ -210,16 +219,17 @@ async def get_used_image_url_and_draft(db: db_dependency, travelogue_id: int):
 
 
 class MetadataResponse(BaseModel):
-    id: int
     image_id: int
     created_at: datetime | None = None
     location: str | None = None
 
+class ImageMetadataResponse(BaseModel):
+    image_metadata_list: List[MetadataResponse]
 
 @router.get(
     "/api/image/{travelogue_id}/none/metadata",
     status_code=status.HTTP_200_OK,
-    response_model=List[MetadataResponse],
+    response_model=ImageMetadataResponse,
     summary="메타데이터가 없는 이미지 확인",
     description="travelogue_id가 true인 이미지 중 메타데이터 누락 사항이 있는 것을 확인합니다."
 )
@@ -242,7 +252,7 @@ async def get_none_metadata_image(db: db_dependency, travelogue_id: int):
         if not image_id_list:
             return []
 
-        metadatas = db.query(Metadata).filter(
+        metadatas = db.query(Metadata.image_id, Metadata.created_at, Metadata.location).filter(
             Metadata.image_id.in_(image_id_list),
             or_(
                 Metadata.created_at == None,
@@ -250,7 +260,7 @@ async def get_none_metadata_image(db: db_dependency, travelogue_id: int):
             )
         ).all()
 
-        return metadatas
+        return {"image_metadata_list": metadatas}
     except Exception as e:
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
