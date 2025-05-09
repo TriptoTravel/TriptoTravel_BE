@@ -19,7 +19,7 @@ class TravelQuestionResponse(Base):
     __tablename__ = 'travel_question_response'
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     travelogue_id = Column(Integer, ForeignKey('travelogue.id'), nullable=False)
-    who = Column(String)
+    who_category = Column(Integer)
 
 
 class TravelogueImage(Base):
