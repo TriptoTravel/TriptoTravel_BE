@@ -286,3 +286,31 @@ async def update_metadata(db: db_dependency, update: MetadataUpdate, image_id: i
             detail=f"Unexpected error: {str(e)}"
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
+class FinalRequest(BaseModel):
+    final: str
+
+
+@router.patch(
+    "/api/image/{image_id}/correction",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="여행기 final 필드 수정",
+    description="image_id에 해당하는 튜플의 final 값을 저장합니다."
+)
+async def update_final(db: db_dependency, image_id: int, final: FinalRequest):
+    db_image = db.query(Image).filter(Image.id == image_id).first()
+    if not db_image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"error": "image not found"})
+    db_image.final = final.final
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
