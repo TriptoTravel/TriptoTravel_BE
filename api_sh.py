@@ -19,7 +19,7 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 
 class TravelPurposeQuestionRequest(BaseModel):
-    who: conlist(conint(ge=1, le=6), min_length=1, max_length=6)
+    who_category: conlist(conint(ge=1, le=6), min_length=1, max_length=6)
     purpose_category: conlist(conint(ge=1, le=4), min_length=1, max_length=4)
 
 class TravelPurposeQuestionResponse(BaseModel):
@@ -62,17 +62,17 @@ async def create_purpose_and_question(
                 "purpose_category": new_purpose.purpose_category
             })
 
-        for who_id in request.who:
+        for who_id in request.who_category:
             new_question = TravelQuestionResponse(
                 travelogue_id=travelogue_id,
-                who=str(who_id)
+                who_category=str(who_id)
             )
             db.add(new_question)
             db.flush()
             question_list.append({
                 "id": new_question.id,
                 "travelogue_id": new_question.travelogue_id,
-                "who": new_question.who
+                "who_category": new_question.who_category
             })
 
         db.commit()
