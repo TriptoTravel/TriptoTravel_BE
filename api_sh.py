@@ -65,7 +65,7 @@ async def create_purpose_and_question(
         for who_id in request.who_category:
             new_question = TravelQuestionResponse(
                 travelogue_id=travelogue_id,
-                who_category=str(who_id)
+                who_category=who_id
             )
             db.add(new_question)
             db.flush()
