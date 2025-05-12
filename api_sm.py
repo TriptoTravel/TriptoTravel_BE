@@ -397,7 +397,7 @@ class DraftResponse(BaseModel):
     summary="여행기 초안 반환",
     description="travelogue_id에 대한 draft를 시간 순으로 정렬해 반환합니다."
 )
-async def get_travelogue_draft(db: db_dependency, travelogue_id: int):
+async def get_time_ordered_travelogue_draft(db: db_dependency, travelogue_id: int):
     mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
     if not mappings:
         raise HTTPException(  
@@ -422,7 +422,6 @@ async def get_travelogue_draft(db: db_dependency, travelogue_id: int):
 
         return {"draft_list": [{"image_id": image.id, "draft": image.draft} for image in sorted_images]}
     except Exception as e:
-        db.rollback()
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
             detail=f"Unexpected error: {str(e)}"
