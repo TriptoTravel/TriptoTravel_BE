@@ -3,9 +3,20 @@ from pydantic import BaseModel, conlist, conint
 from typing import Annotated, List
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from models import Purpose, TravelQuestionResponse, Travelogue
+from models import Purpose, TravelQuestionResponse, Travelogue, Travelogue, Image, TravelogueImage
 from database import SessionLocal
 from starlette import status
+from datetime import datetime
+from gcs_utils import upload_pdf_and_generate_url, bucket, BUCKET_NAME
+import exifread
+import io
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from PIL import Image as PILImage
 
 router = APIRouter()
 
@@ -19,7 +30,7 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 
 class TravelPurposeQuestionRequest(BaseModel):
-    who: conlist(conint(ge=1, le=6), min_length=1, max_length=6)
+    who_category: conlist(conint(ge=1, le=6), min_length=1, max_length=6)
     purpose_category: conlist(conint(ge=1, le=4), min_length=1, max_length=4)
 
 class TravelPurposeQuestionResponse(BaseModel):
@@ -62,17 +73,17 @@ async def create_purpose_and_question(
                 "purpose_category": new_purpose.purpose_category
             })
 
-        for who_id in request.who:
+        for who_id in request.who_category:
             new_question = TravelQuestionResponse(
                 travelogue_id=travelogue_id,
-                who=str(who_id)
+                who_category=who_id
             )
             db.add(new_question)
             db.flush()
             question_list.append({
                 "id": new_question.id,
                 "travelogue_id": new_question.travelogue_id,
-                "who": new_question.who
+                "who_category": new_question.who_category
             })
 
         db.commit()
@@ -94,3 +105,147 @@ async def create_purpose_and_question(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+    
+
+class ExportResponse(BaseModel):
+    message: str
+    file_path: str
+    export_url: str
+
+def extract_gcs_file_name(image_uri: str) -> str:
+    prefix = f"gs://{BUCKET_NAME}/"
+    if image_uri.startswith(prefix):
+        return image_uri[len(prefix):]
+    return image_uri
+
+def extract_created_at_from_gcs(image_path: str) -> datetime:
+    file_name = extract_gcs_file_name(image_path)
+    blob = bucket.blob(file_name)
+    if not blob.exists():
+        return None
+    image_bytes = blob.download_as_bytes()
+    stream = io.BytesIO(image_bytes)
+    tags = exifread.process_file(stream, details=False)
+    for tag in ("EXIF DateTimeOriginal", "Image DateTime"):
+        if tag in tags:
+            try:
+                return datetime.strptime(str(tags[tag]), "%Y:%m:%d %H:%M:%S")
+            except Exception:
+                continue
+    return None
+
+@router.post(
+    "/api/travelogue/{travelogue_id}/export",
+    status_code=status.HTTP_200_OK,
+    response_model=ExportResponse,
+    summary="여행기 PDF 저장 및 공유",
+    description="완성된 여행기를 PDF로 저장하고 공유 링크를 생성합니다."
+)
+async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
+    travelogue = db.query(Travelogue).filter(Travelogue.id == travelogue_id).first()
+    if not travelogue:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Travelogue ID {travelogue_id} not found"
+        )
+
+    image_ids = db.query(TravelogueImage.image_id).filter(
+        TravelogueImage.travelogue_id == travelogue_id
+    ).all()
+    image_ids = [i[0] for i in image_ids]
+    images = db.query(Image).filter(
+        Image.id.in_(image_ids),
+        Image.is_in_travelogue == True
+    ).order_by(Image.id).all()
+
+    if not images:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No images found for this travelogue."
+        )
+
+
+    font_path = "C:/Windows/Fonts/malgun.ttf"
+    font_name = "MalgunGothic"
+    try:
+        pdfmetrics.registerFont(TTFont(font_name, font_path))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"폰트 등록 실패: {e}")
+
+
+    images_with_dates = []
+    for img in images:
+        file_name = extract_gcs_file_name(img.uri)
+        blob = bucket.blob(file_name)
+        if not blob.exists():
+            continue
+        created_at = extract_created_at_from_gcs(img.uri)
+        images_with_dates.append({
+            "img": img,
+            "created_at": created_at
+        })
+    images_with_dates.sort(key=lambda x: (x["created_at"] is None, x["created_at"]))
+
+    if not images_with_dates:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GCS에 존재하는 이미지가 없습니다."
+        )
+
+
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    for item in images_with_dates:
+        img = item["img"]
+        file_name = extract_gcs_file_name(img.uri)
+        blob = bucket.blob(file_name)
+        image_bytes = blob.download_as_bytes()
+        image_stream = io.BytesIO(image_bytes)
+        image_reader = ImageReader(image_stream)
+
+ 
+        image_stream.seek(0)
+        pil_img = PILImage.open(image_stream)
+        orig_width, orig_height = pil_img.size
+        x = 0
+        y = height - orig_height
+
+        p.drawImage(image_reader, x, y, width=orig_width, height=orig_height)
+
+
+        p.setFont(font_name, 12)
+        text_y = y - 30
+        text_object = p.beginText(x, text_y)
+        final_text = img.final if img.final is not None else ""
+        for line in final_text.splitlines():
+            text_object.textLine(line)
+        p.drawText(text_object)
+
+        p.showPage()
+
+    p.save()
+    buffer.seek(0)
+
+
+    desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+    os.makedirs(desktop_dir, exist_ok=True)
+    file_path = os.path.join(desktop_dir, f"travelogue_{travelogue_id}.pdf")
+    with open(file_path, "wb") as f:
+        f.write(buffer.getvalue())
+
+
+    try:
+        export_url = upload_pdf_and_generate_url(file_path, travelogue_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"PDF 업로드 실패: {str(e)}"
+        )
+
+    return {
+        "message": "PDF가 바탕화면에 저장되었습니다.",
+        "file_path": file_path,
+        "export_url": export_url
+    }

@@ -45,3 +45,17 @@ def generate_signed_url(image_uri: str, expiration: int = 300) -> str:
         expiration=timedelta(seconds=expiration),
         method="GET"
     )
+
+def upload_pdf_and_generate_url(file_path: str, travelogue_id: int) -> str:
+    file_name = f"exports/travelogue_{travelogue_id}.pdf"  # GCS 내 저장 경로
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+    blob = bucket.blob(file_name)
+    blob.upload_from_string(file_bytes, content_type="application/pdf")
+
+    url = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(hours=1),  # 1시간 유효
+        method="GET"
+    )
+    return url
