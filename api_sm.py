@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from models import *
 from starlette import status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_
+from sqlalchemy import or_, asc
 from gcs_utils import upload_image_to_gcs, delete_image_from_gcs, generate_signed_url
 
 router = APIRouter()
@@ -373,6 +373,54 @@ async def create_image_question_response(db: db_dependency, image_id: int, reque
         db.commit()
 
         return {"image_id": image_id, "how": request.how, "emotion_list": emotion_list}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
+            detail=f"Unexpected error: {str(e)}"
+        )
+    
+
+
+class DraftItem(BaseModel):
+    image_id: int
+    draft: str | None = None
+
+class DraftResponse(BaseModel):
+    draft_list: List[DraftItem]
+
+
+@router.get(
+    "/api/travelogue/{travelogue_id}/draft",
+    status_code=status.HTTP_200_OK,
+    response_model=DraftResponse,
+    summary="여행기 초안 반환",
+    description="travelogue_id에 대한 draft를 시간 순으로 정렬해 반환합니다."
+)
+async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
+    mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
+    if not mappings:
+        raise HTTPException(  
+                status_code=status.HTTP_404_NOT_FOUND,  
+                detail=f"Travelogue id : {travelogue_id} not found"  
+            )
+    try:
+        image_ids = [mapping.image_id for mapping in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids),
+            Image.is_in_travelogue == True
+        ).all()
+
+        image_dict = {image.id: image for image in images}
+        sorted_images = [
+            image_dict[metadata.image_id]
+            for metadata in db.query(Metadata)
+                .filter(Metadata.image_id.in_(image_ids))
+                .order_by(asc(Metadata.created_at))
+            if metadata.image_id in image_dict
+        ]
+
+        return {"draft_list": [{"image_id": image.id, "draft": image.draft} for image in sorted_images]}
     except Exception as e:
         db.rollback()
         raise HTTPException(  
