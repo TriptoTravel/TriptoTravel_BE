@@ -397,7 +397,7 @@ class DraftResponse(BaseModel):
     summary="여행기 초안 반환",
     description="travelogue_id에 대한 draft를 시간 순으로 정렬해 반환합니다."
 )
-async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
+async def get_travelogue_draft(db: db_dependency, travelogue_id: int):
     mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
     if not mappings:
         raise HTTPException(  
