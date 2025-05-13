@@ -164,14 +164,12 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
             detail="No images found for this travelogue."
         )
 
-
     font_path = "C:/Windows/Fonts/malgun.ttf"
     font_name = "MalgunGothic"
     try:
         pdfmetrics.registerFont(TTFont(font_name, font_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"폰트 등록 실패: {e}")
-
 
     images_with_dates = []
     for img in images:
@@ -192,7 +190,6 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
             detail="GCS에 존재하는 이미지가 없습니다."
         )
 
-
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
@@ -205,36 +202,53 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
         image_stream = io.BytesIO(image_bytes)
         image_reader = ImageReader(image_stream)
 
- 
         image_stream.seek(0)
         pil_img = PILImage.open(image_stream)
         orig_width, orig_height = pil_img.size
-        x = 0
-        y = height - orig_height
+        max_img_width = width * 0.8
+        if orig_width > max_img_width:
+            ratio = max_img_width / orig_width
+            orig_width = int(orig_width * ratio)
+            orig_height = int(orig_height * ratio)
+
+        x = (width - orig_width) / 2
+        y = (height - orig_height) / 2
+
+        if orig_height + 50 > height:
+            orig_height = height - 50
+            y = (height - orig_height) / 2
 
         p.drawImage(image_reader, x, y, width=orig_width, height=orig_height)
 
-
-        p.setFont(font_name, 12)
-        text_y = y - 30
-        text_object = p.beginText(x, text_y)
         final_text = img.final if img.final is not None else ""
-        for line in final_text.splitlines():
-            text_object.textLine(line)
-        p.drawText(text_object)
+        lines = final_text.splitlines()
+        font_size = 12
+
+        if lines:
+            max_line_width = max(p.stringWidth(line, font_name, font_size) for line in lines)
+            text_x = (width - max_line_width) / 2
+            text_y = y - 30
+
+            while max_line_width > width * 0.9 and font_size > 8:
+                font_size -= 1
+                max_line_width = max(p.stringWidth(line, font_name, font_size) for line in lines)
+
+            p.setFont(font_name, font_size)
+            text_object = p.beginText(text_x, text_y)
+            for line in lines:
+                text_object.textLine(line)
+            p.drawText(text_object)
 
         p.showPage()
 
     p.save()
     buffer.seek(0)
 
-
     desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
     os.makedirs(desktop_dir, exist_ok=True)
     file_path = os.path.join(desktop_dir, f"travelogue_{travelogue_id}.pdf")
     with open(file_path, "wb") as f:
         f.write(buffer.getvalue())
-
 
     try:
         export_url = upload_pdf_and_generate_url(file_path, travelogue_id)
