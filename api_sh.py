@@ -221,21 +221,29 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
         p.drawImage(image_reader, x, y, width=orig_width, height=orig_height)
 
         final_text = img.final if img.final is not None else ""
-        lines = final_text.splitlines()
         font_size = 12
+        max_text_width = width * 0.8
 
-        if lines:
-            max_line_width = max(p.stringWidth(line, font_name, font_size) for line in lines)
+        wrapped_lines = []
+        for raw_line in final_text.splitlines():
+            line = ""
+            for char in raw_line:
+                test_line = line + char
+                if p.stringWidth(test_line, font_name, font_size) > max_text_width:
+                    wrapped_lines.append(line)
+                    line = char
+                else:
+                    line = test_line
+            wrapped_lines.append(line)
+
+        if wrapped_lines:
+            max_line_width = max(p.stringWidth(line, font_name, font_size) for line in wrapped_lines)
             text_x = (width - max_line_width) / 2
             text_y = y - 30
 
-            while max_line_width > width * 0.9 and font_size > 8:
-                font_size -= 1
-                max_line_width = max(p.stringWidth(line, font_name, font_size) for line in lines)
-
             p.setFont(font_name, font_size)
             text_object = p.beginText(text_x, text_y)
-            for line in lines:
+            for line in wrapped_lines:
                 text_object.textLine(line)
             p.drawText(text_object)
 
