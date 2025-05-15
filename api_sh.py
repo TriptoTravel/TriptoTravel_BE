@@ -7,7 +7,7 @@ from models import Purpose, TravelQuestionResponse, Travelogue, Travelogue, Imag
 from database import SessionLocal
 from starlette import status
 from datetime import datetime
-from gcs_utils import upload_pdf_and_generate_url, bucket, BUCKET_NAME
+from gcs_utils import extract_gcs_file_name, extract_created_at_from_gcs, upload_pdf_and_generate_url, bucket, BUCKET_NAME
 import exifread
 import io
 import os
@@ -114,28 +114,6 @@ load_dotenv()
 class ExportResponse(BaseModel):
     file_path: str
     export_url: str
-
-def extract_gcs_file_name(image_uri: str) -> str:
-    prefix = f"gs://{BUCKET_NAME}/"
-    if image_uri.startswith(prefix):
-        return image_uri[len(prefix):]
-    return image_uri
-
-def extract_created_at_from_gcs(image_path: str) -> datetime:
-    file_name = extract_gcs_file_name(image_path)
-    blob = bucket.blob(file_name)
-    if not blob.exists():
-        return None
-    image_bytes = blob.download_as_bytes()
-    stream = io.BytesIO(image_bytes)
-    tags = exifread.process_file(stream, details=False)
-    for tag in ("EXIF DateTimeOriginal", "Image DateTime"):
-        if tag in tags:
-            try:
-                return datetime.strptime(str(tags[tag]), "%Y:%m:%d %H:%M:%S")
-            except Exception:
-                continue
-    return None
 
 @router.get(
     "/api/travelogue/{travelogue_id}/export",
@@ -281,7 +259,6 @@ async def export_travelogue(travelogue_id: int, db: db_dependency):
     except HTTPException as e:
         raise
     except Exception as e:
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="서버 내부 오류가 발생했습니다."

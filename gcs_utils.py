@@ -1,8 +1,10 @@
 from google.cloud import storage
 from typing import Optional
 from google.oauth2 import service_account
-from datetime import timedelta
+from datetime import timedelta, datetime
 import os
+import io
+import exifread
 
 BUCKET_NAME = "trip_to_travel_bucket"
 
@@ -45,6 +47,28 @@ def generate_signed_url(image_uri: str, expiration: int = 300) -> str:
         expiration=timedelta(seconds=expiration),
         method="GET"
     )
+
+def extract_gcs_file_name(image_uri: str) -> str:
+    prefix = f"gs://{BUCKET_NAME}/"
+    if image_uri.startswith(prefix):
+        return image_uri[len(prefix):]
+    return image_uri
+
+def extract_created_at_from_gcs(image_path: str) -> datetime:
+    file_name = extract_gcs_file_name(image_path)
+    blob = bucket.blob(file_name)
+    if not blob.exists():
+        return None
+    image_bytes = blob.download_as_bytes()
+    stream = io.BytesIO(image_bytes)
+    tags = exifread.process_file(stream, details=False)
+    for tag in ("EXIF DateTimeOriginal", "Image DateTime"):
+        if tag in tags:
+            try:
+                return datetime.strptime(str(tags[tag]), "%Y:%m:%d %H:%M:%S")
+            except Exception:
+                continue
+    return None
 
 def upload_pdf_and_generate_url(file_path: str, travelogue_id: int) -> str:
     file_name = f"exports/travelogue_{travelogue_id}.pdf"
