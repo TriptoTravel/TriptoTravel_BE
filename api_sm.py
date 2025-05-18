@@ -9,6 +9,7 @@ from starlette import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, asc
 from gcs_utils import upload_image_to_gcs, delete_image_from_gcs, generate_signed_url
+import requests
 
 router = APIRouter()
 
@@ -422,5 +423,73 @@ async def get_time_ordered_travelogue_draft(db: db_dependency, travelogue_id: in
     except Exception as e:
         raise HTTPException(  
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
+            detail=f"Unexpected error: {str(e)}"
+        )
+    
+
+@router.patch(
+    "/api/image/{travelogue_id}/selection/first",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="이미지 중요도/1차 선별 수행",
+    description="각 이미지의 중요도에 따라 image_num만큼만 선별하여 1차 선별을 수행합니다."
+)
+async def execute_first_selection(db: db_dependency, image_num: int, travelogue_id: int):
+    mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
+    if not mappings:
+        raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,  
+                detail=f"Travelogue id : {travelogue_id} not found"  
+            )
+    try:
+        image_ids = [mapping.image_id for mapping in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids),
+            Image.is_in_travelogue == True
+        ).all()
+
+        purposes = db.query(Purpose).filter(Purpose.travelogue_id == travelogue_id).all()
+        purpose_categories = db.query(PurposeCategory).all()
+        purpose_category_dict = {pc.id: pc.purpose for pc in purpose_categories}
+        purpose_list = [purpose_category_dict[purpose.purpose_category] for purpose in purposes]
+
+        ai_request_data = {
+            "images": [{"image_id": image.id, "image_url": generate_signed_url(image.uri)} for image in images],
+            "purpose": purpose_list
+        }
+        
+        ai_server = "http://34.64.172.167:8000/select-primary-image"
+        ai_response_data = requests.get(
+            ai_server,
+            json=ai_request_data
+        )
+        if ai_response_data.status_code != 200:
+            raise Exception(f"AI API Error: {ai_response_data.text}")
+
+        importance_data = ai_response_data.json()
+        
+        importance_map = {item["image_id"]: item["importance"] for item in importance_data}
+        
+        for image in images:
+            image.importance = importance_map.get(image.id, 0.0)
+            db.add(image)
+        sorted_images = sorted(images, key=lambda x: x.importance, reverse=True)
+
+        if image_num > len(images):
+            image_num = len(images)
+        selected_images = sorted_images[:image_num]
+        unselected_images = sorted_images[image_num:]
+
+        for image in unselected_images:
+            image.is_in_travelogue = False
+            db.add(image)
+        for image in selected_images:
+            db.add(image)
+        db.commit()
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
         )
