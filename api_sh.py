@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, conlist, conint
 from typing import Annotated, List
 from sqlalchemy.exc import IntegrityError
@@ -108,21 +108,17 @@ async def create_purpose_and_question(
             detail=str(e)
         )
     
+##################################################################################
 
 load_dotenv()
-
-class ExportResponse(BaseModel):
-    file_path: str
-    export_url: str
 
 @router.get(
     "/api/travelogue/{travelogue_id}/export",
     status_code=status.HTTP_200_OK,
-    response_model=ExportResponse,
-    summary="여행기 PDF 저장 및 공유",
-    description="완성된 여행기를 PDF로 저장하고 공유 링크를 생성합니다."
+    summary="여행기 PDF 저장",
+    description="완성된 여행기의 PDF 바이너리를 반환합니다."
 )
-async def export_travelogue(travelogue_id: int, db: db_dependency):
+async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
     try:
         travelogue = db.query(Travelogue).filter(Travelogue.id == travelogue_id).first()
         if not travelogue:
@@ -150,7 +146,7 @@ async def export_travelogue(travelogue_id: int, db: db_dependency):
         font_name = "MalgunGothic"
         base_dir = os.path.dirname(os.path.abspath(__file__))
         font_path_full = os.path.join(base_dir, font_path)
-
+        
         try:
             pdfmetrics.registerFont(TTFont(font_name, font_path_full))
         except Exception as e:
@@ -236,25 +232,9 @@ async def export_travelogue(travelogue_id: int, db: db_dependency):
 
         p.save()
         buffer.seek(0)
+        pdf_bytes = buffer.getvalue()
 
-        desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
-        os.makedirs(desktop_dir, exist_ok=True)
-        file_path = os.path.join(desktop_dir, f"travelogue_{travelogue_id}.pdf")
-        with open(file_path, "wb") as f:
-            f.write(buffer.getvalue())
-
-        try:
-            export_url = upload_pdf_and_generate_url(file_path, travelogue_id)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"PDF 업로드 실패: {str(e)}"
-            )
-
-        return {
-            "file_path": file_path,
-            "export_url": export_url
-        }
+        return Response(content=pdf_bytes, media_type="application/pdf")
 
     except HTTPException as e:
         raise
