@@ -453,13 +453,14 @@ async def execute_first_selection(db: db_dependency, image_num: int, travelogue_
         purpose_list = [purpose_category_dict[purpose.purpose_category] for purpose in purposes]
 
         ai_request_data = {
-            "images": [{"image_id": image.id, "image_url": generate_signed_url(image.uri)} for image in images],
+            "image_list": [{"image_id": image.id, "image_url": generate_signed_url(image.uri)} for image in images],
             "purpose": purpose_list
         }
-        
+
         ai_server = "http://34.64.172.167:8000/select-primary-image"
         ai_response_data = requests.get(
             ai_server,
+            headers={"Content-Type": "application/json"},
             json=ai_request_data
         )
         if ai_response_data.status_code != 200:
