@@ -494,3 +494,95 @@ async def execute_first_selection(db: db_dependency, image_num: int, travelogue_
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
         )
+
+
+
+@router.patch(
+    "/api/travelogue/{travelogue_id}/generation",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="여행기 초안 생성 및 저장",
+    description="travelogue_id에 대한 여행기를 생성하여 저장합니다."
+)
+async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
+    mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
+    if not mappings:
+        raise HTTPException(  
+                status_code=status.HTTP_404_NOT_FOUND,  
+                detail=f"Travelogue id : {travelogue_id} not found"  
+            )
+    try:
+        image_ids = [mapping.image_id for mapping in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids),
+            Image.is_in_travelogue == True
+        ).all()
+
+        # 여행기 who, style
+        who_category = db.query(TravelQuestionResponse).filter(TravelQuestionResponse.travelogue_id == travelogue_id).first()
+        who = db.query(WhoCategory).filter(WhoCategory.id == who_category.who_category).first()
+        style_category = db.query(Travelogue).filter(Travelogue.id == travelogue_id).first()
+        style = db.query(StyleCategory).filter(StyleCategory.id == style_category.style_category).first()
+        
+        # 이미지 별 how
+        how_responses = db.query(ImageQuestionResponse).filter(ImageQuestionResponse.image_id.in_(image_ids)).all()
+        how_map = {q.image_id: q.how for q in how_responses}
+
+        # emotion
+        emotion_responses = db.query(ImageQuestionResponse.image_id,EmotionCategory.emotion) \
+                            .join(Emotion, Emotion.question_response_id == ImageQuestionResponse.id) \
+                            .join(EmotionCategory, Emotion.emotion_category == EmotionCategory.id) \
+                            .filter(ImageQuestionResponse.image_id.in_(image_ids)).all()
+
+        emotion_map = {}
+        for image_id, emotion in emotion_responses:
+            if image_id not in emotion_map:
+                emotion_map[image_id] = []
+            emotion_map[image_id].append(emotion)
+        
+        # 메타데이터 조회
+        metadata_list = db.query(Metadata).filter(Metadata.image_id.in_(image_ids)).all()
+        metadata_map = {m.image_id: m for m in metadata_list}
+        
+        ai_request_data = {
+            "image_list": [
+                {
+                    "image_id": image.id,
+                    "who": who.who if who.who else None,
+                    "how": how_map.get(image.id),
+                    "emotion": emotion_map.get(image.id, []),
+                    "created_at": metadata_map.get(image.id).created_at.isoformat()
+                        if image.id in metadata_map and metadata_map[image.id].created_at
+                        else None,
+                    "location": metadata_map.get(image.id).location
+                        if image.id in metadata_map and metadata_map[image.id].location
+                        else None,
+                    "style": style.style if style.style else None,
+                    "caption": image.caption if image.caption else None
+                }
+                for image in images
+            ]
+        }
+        
+        ai_server = "http://34.64.172.167:8000/generate-travel-log" # ai_server endpoint
+        ai_response_data = requests.get(
+            ai_server,
+            json=ai_request_data
+        )
+        if ai_response_data.status_code != 200:
+            raise Exception(f"AI API Error: {ai_response_data.text}")
+        
+        draft_data = ai_response_data.json()
+
+        draft_map = {item["image_id"]: item["draft"] for item in draft_data}
+        for image in images:
+            image.draft = draft_map.get(image.id, "")
+            db.add(image)
+        db.commit()
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(  
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,  
+            detail=f"Unexpected error: {str(e)}"
+        )
