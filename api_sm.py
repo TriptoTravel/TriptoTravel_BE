@@ -118,7 +118,7 @@ class CombinedResponse(BaseModel):
     summary="이미지 튜플 생성 및 업로드",
     description="입력된 이미지를 기반으로 튜플을 생성하고, GCP Storage에 업로드합니다."
 )
-async def create_image(db:db_dependency, travelogue_id: int = Form(...), images: List[UploadFile] = File(...)):
+async def create_image(db: db_dependency, travelogue_id: int = Form(...), images: List[UploadFile] = File(...)):
     travelogue = db.get(Travelogue, travelogue_id)
     if not travelogue:
         raise HTTPException(
@@ -132,7 +132,7 @@ async def create_image(db:db_dependency, travelogue_id: int = Form(...), images:
         for i, image in enumerate(images, start=1):
             file_name = f"{travelogue_id}_{i}.jpg"
             file_bytes = await image.read()
-            uri = upload_image_to_gcs(file_bytes, file_name, content_type=image.content_type)
+            uri = await upload_image_to_gcs(file_bytes, file_name, content_type=image.content_type)
             uploaded_files.append(file_name)
 
             image = Image(

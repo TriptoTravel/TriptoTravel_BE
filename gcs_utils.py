@@ -5,6 +5,7 @@ from datetime import timedelta, datetime
 import os
 import io
 import exifread
+import asyncio
 
 BUCKET_NAME = "trip_to_travel_bucket"
 
@@ -25,10 +26,19 @@ credentials = service_account.Credentials.from_service_account_info(credentials_
 storage_client = storage.Client(credentials=credentials, project=credentials_info["project_id"])
 bucket = storage_client.bucket(BUCKET_NAME)
 
-def upload_image_to_gcs(file_bytes, file_name: str, content_type: Optional[str] = "image/jpeg") -> str:
-    blob = bucket.blob(file_name)
-    blob.upload_from_string(file_bytes, content_type=content_type)
-    return f"gs://{BUCKET_NAME}/{file_name}"
+# 동시 업로드 수 제한 (5개)
+UPLOAD_CONCURRENCY_LIMIT = 5
+upload_semaphore = asyncio.Semaphore(UPLOAD_CONCURRENCY_LIMIT)
+
+async def upload_image_to_gcs(file_bytes, file_name: str, content_type: Optional[str] = "image/jpeg") -> str:
+    async with upload_semaphore:
+        def _upload():
+            blob = bucket.blob(file_name)
+            blob.upload_from_string(file_bytes, content_type=content_type)
+            return f"gs://{BUCKET_NAME}/{file_name}"
+        
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _upload)
 
 def delete_image_from_gcs(file_name: str) -> bool:
     blob = bucket.blob(file_name)
