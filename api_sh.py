@@ -171,6 +171,8 @@ async def select_second_image(
                 {Image.is_in_travelogue: False}, synchronize_session=False
             )
 
+        db.commit()
+
         mappings = db.query(TravelogueImage).filter(
             TravelogueImage.travelogue_id == travelogue_id
         ).all()
