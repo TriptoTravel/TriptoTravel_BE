@@ -168,10 +168,11 @@ async def select_second_image(
     try:
         if image_ids:
             db.query(Image).filter(Image.id.in_(image_ids)).update(
-                {Image.is_in_travelogue: False}
+                {Image.is_in_travelogue: False},
+                synchronize_session=False
             )
-
-        db.commit()
+            db.commit()
+            db.expire_all()
 
         mappings = db.query(TravelogueImage).filter(
             TravelogueImage.travelogue_id == travelogue_id
