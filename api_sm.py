@@ -562,12 +562,13 @@ async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
                 for image in images
             ]
         }
-        
+        print(ai_request_data)
         ai_server = "http://34.64.172.167:8000/generate-travel-log" # ai_server endpoint
         ai_response_data = requests.get(
             ai_server,
             json=ai_request_data
         )
+        print(ai_response_data.json())
         if ai_response_data.status_code != 200:
             raise Exception(f"AI API Error: {ai_response_data.text}")
         
