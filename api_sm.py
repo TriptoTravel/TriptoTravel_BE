@@ -504,25 +504,27 @@ async def execute_first_selection(db: db_dependency, image_num: int, travelogue_
     description="travelogue_id에 대한 여행기를 생성하여 저장합니다."
 )
 async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
+    print(1)
     mappings = db.query(TravelogueImage).filter(TravelogueImage.travelogue_id == travelogue_id).all()
     if not mappings:
         raise HTTPException(  
                 status_code=status.HTTP_404_NOT_FOUND,  
                 detail=f"Travelogue id : {travelogue_id} not found"  
             )
+    print(2)
     try:
         image_ids = [mapping.image_id for mapping in mappings]
         images = db.query(Image).filter(
             Image.id.in_(image_ids),
             Image.is_in_travelogue == True
         ).all()
-
+        print(3)
         # 여행기 who, style
         who_category = db.query(TravelQuestionResponse).filter(TravelQuestionResponse.travelogue_id == travelogue_id).first()
         who = db.query(WhoCategory).filter(WhoCategory.id == who_category.who_category).first()
         style_category = db.query(Travelogue).filter(Travelogue.id == travelogue_id).first()
         style = db.query(StyleCategory).filter(StyleCategory.id == style_category.style_category).first()
-        
+        print(4)
         # 이미지 별 how
         how_responses = db.query(ImageQuestionResponse).filter(ImageQuestionResponse.image_id.in_(image_ids)).all()
         how_map = {q.image_id: q.how for q in how_responses}
@@ -538,11 +540,11 @@ async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
             if image_id not in emotion_map:
                 emotion_map[image_id] = []
             emotion_map[image_id].append(emotion)
-        
+        print(5)
         # 메타데이터 조회
         metadata_list = db.query(Metadata).filter(Metadata.image_id.in_(image_ids)).all()
         metadata_map = {m.image_id: m for m in metadata_list}
-        
+        print(6)
         ai_request_data = {
             "image_list": [
                 {
