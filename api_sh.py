@@ -1,15 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from pydantic import BaseModel, conlist, conint
-from typing import Annotated, List
+from typing import Annotated, List, Optional, Dict, Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from models import Purpose, TravelQuestionResponse, Travelogue, Travelogue, Image, TravelogueImage
+from models import Purpose, TravelQuestionResponse, Travelogue, Image, TravelogueImage, Metadata
 from database import SessionLocal
 from starlette import status
 from datetime import datetime
-from gcs_utils import extract_gcs_file_name, extract_created_at_from_gcs, upload_pdf_and_generate_url, bucket, BUCKET_NAME
+from sqlalchemy import or_
+from gcs_utils import generate_signed_url, extract_gcs_file_name, extract_datetime_location_from_gcs, extract_created_at_from_gcs, upload_pdf_and_generate_url, bucket, BUCKET_NAME
+from google.cloud import storage
 import exifread
 import io
+import requests
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderUnavailable
 import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -107,8 +112,165 @@ async def create_purpose_and_question(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+
+class CaptionResponse(BaseModel):
+    image_id: int
+    caption: str
+
+class MetadataResponse(BaseModel):
+    image_id: int
+    created_at: Optional[datetime] = None
+    location: Optional[str] = None
+
+class CaptionMetadataResponse(BaseModel):
+    caption_list: List[CaptionResponse]
+    metadata_list: List[MetadataResponse]
+
+
+def convert_to_degrees(value):
+    d = float(value.values[0].num) / float(value.values[0].den)
+    m = float(value.values[1].num) / float(value.values[1].den)
+    s = float(value.values[2].num) / float(value.values[2].den)
+    return d + (m / 60.0) + (s / 3600.0)
+
+geolocator = Nominatim(user_agent="your_app_name", timeout=600)
+
+def reverse_geocode(lat: float, lon: float) -> str: 
+    try:
+        location = geolocator.reverse((lat, lon), language='ko')
+        if location and location.address:
+            return location.address
+        else:
+            return "주소 정보 없음"
+    except GeocoderUnavailable:
+        return "주소 정보 없음"
+    except Exception:
+        return "주소 정보 없음"
     
-##################################################################################
+
+@router.get(
+    "/api/image/{travelogue_id}/selection/second",
+    status_code=status.HTTP_200_OK,
+    response_model=CaptionMetadataResponse,
+    summary="이미지 2차 선별/캡셔닝/메타데이터 추출",
+    description="여행기 중 사용하지 않을 이미지 비활성화 및 나머지 이미지 대상으로 AI 캡션과 백엔드 메타데이터를 추출합니다."
+)
+async def select_second_image(
+    travelogue_id: int,
+    image_ids: Optional[List[int]] = Query(None),
+    db: Session = Depends(get_db)
+):
+    caption_list = []
+    metadata_list = []
+
+    try:
+        if image_ids:
+            db.query(Image).filter(Image.id.in_(image_ids)).update(
+                {Image.is_in_travelogue: False}, synchronize_session=False
+            )
+
+        mappings = db.query(TravelogueImage).filter(
+            TravelogueImage.travelogue_id == travelogue_id
+        ).all()
+        if not mappings:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Travelogue id : {travelogue_id} not found"
+            )
+
+        image_ids_valid = [m.image_id for m in mappings]
+        images = db.query(Image).filter(
+            Image.id.in_(image_ids_valid),
+            Image.is_in_travelogue == True
+        ).all()
+
+        # 3. AI 캡셔닝 요청 데이터 생성
+        ai_request_data = {"image_list": [
+            {"image_id": img.id, "image_url": generate_signed_url(img.uri)} for img in images
+        ]
+        }
+
+        # 4. AI 서버로 캡셔닝 요청
+        try:
+            ai_response = requests.get("http://34.64.172.167:8000/generate-caption", json=ai_request_data)
+            ai_response.raise_for_status()
+            caption_results = ai_response.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI server error: {str(e)}"
+            )
+
+        # 5. 메타데이터 추출 및 DB 저장
+        for img in images:
+            try:
+                meta = extract_datetime_location_from_gcs(img.uri)
+                created_at = meta["created_at"]
+                gps_latitude = meta.get("gps_latitude")
+                gps_latitude_ref = meta.get("gps_latitude_ref")
+                gps_longitude = meta.get("gps_longitude")
+                gps_longitude_ref = meta.get("gps_longitude_ref")
+                if gps_latitude and gps_latitude_ref and gps_longitude and gps_longitude_ref:
+                    lat = convert_to_degrees(gps_latitude)
+                    lon = convert_to_degrees(gps_longitude)
+                    if gps_latitude_ref.values != 'N':
+                        lat = -lat
+                    if gps_longitude_ref.values != 'E':
+                        lon = -lon
+                    location_str = reverse_geocode(lat, lon)
+                else:
+                    location_str = "정보 없음"
+            except Exception:
+                created_at = None
+                location_str = "정보 없음"
+
+
+            # 기존 Metadata 조회
+            existing_meta = db.query(Metadata).filter(Metadata.image_id == img.id).first()
+
+            # Metadata 업데이트 또는 생성
+            if existing_meta:
+                existing_meta.created_at = created_at
+                existing_meta.location = location_str
+            else:
+                db.add(Metadata(
+                    image_id=img.id,
+                    created_at=created_at,
+                    location=location_str
+                ))
+
+            metadata_list.append({
+                "image_id": img.id,
+                "created_at": created_at,
+                "location": location_str,
+            })
+
+        # 6. 캡션 결과 정리 및 image 테이블에 저장
+        for cap in caption_results:
+            caption_list.append({
+                "image_id": cap["image_id"],
+                "caption": cap["caption"]
+            })
+            # image 테이블에 캡션 저장
+            img = db.query(Image).filter(Image.id == cap["image_id"]).first()
+            if img:
+                img.caption = cap["caption"]
+
+        db.commit()
+        return {
+            "caption_list": caption_list,
+            "metadata_list": metadata_list
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
+    
 
 load_dotenv()
 

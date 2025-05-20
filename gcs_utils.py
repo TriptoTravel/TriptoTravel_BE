@@ -1,5 +1,5 @@
 from google.cloud import storage
-from typing import Optional
+from typing import Optional, Dict, Any
 from google.oauth2 import service_account
 from datetime import timedelta, datetime
 import os
@@ -63,6 +63,37 @@ def extract_gcs_file_name(image_uri: str) -> str:
     if image_uri.startswith(prefix):
         return image_uri[len(prefix):]
     return image_uri
+
+def extract_datetime_location_from_gcs(image_uri: str) -> Dict[str, Optional[Any]]:
+    file_name = extract_gcs_file_name(image_uri)
+    blob = bucket.blob(file_name)
+    image_bytes = blob.download_as_bytes()
+    stream = io.BytesIO(image_bytes)
+    tags = exifread.process_file(stream, details=True)
+
+    created_at = None
+    for tag in ("EXIF DateTimeOriginal", "Image DateTime"):
+        if tag in tags:
+            try:
+                created_at = datetime.strptime(str(tags[tag]), "%Y:%m:%d %H:%M:%S")
+            except Exception:
+                created_at = None
+            break
+
+    gps_latitude = tags.get("GPS GPSLatitude")
+    gps_latitude_ref = tags.get("GPS GPSLatitudeRef")
+    gps_longitude = tags.get("GPS GPSLongitude")
+    gps_longitude_ref = tags.get("GPS GPSLongitudeRef")
+
+    return {
+        "created_at": created_at,
+        "gps_latitude": gps_latitude,
+        "gps_latitude_ref": gps_latitude_ref,
+        "gps_longitude": gps_longitude,
+        "gps_longitude_ref": gps_longitude_ref,
+    }
+
+
 
 def extract_created_at_from_gcs(image_path: str) -> datetime:
     file_name = extract_gcs_file_name(image_path)
