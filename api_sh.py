@@ -150,9 +150,9 @@ def reverse_geocode(lat: float, lon: float) -> str:
         return "주소 정보 없음"
     
 
-@router.get(
+@router.post(
     "/api/image/{travelogue_id}/selection/second",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_201_CREATED,
     response_model=CaptionMetadataResponse,
     summary="이미지 2차 선별/캡셔닝/메타데이터 추출",
     description="여행기 중 사용하지 않을 이미지 비활성화 및 나머지 이미지 대상으로 AI 캡션과 백엔드 메타데이터를 추출합니다."
@@ -396,6 +396,10 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
         buffer.seek(0)
         pdf_bytes = buffer.getvalue()
 
+        file_name = f"exports/travelogue_{travelogue_id}.pdf"
+        blob = bucket.blob(file_name)
+        blob.upload_from_string(pdf_bytes, content_type="application/pdf")
+
         return Response(content=pdf_bytes, media_type="application/pdf")
 
     except HTTPException as e:
@@ -405,3 +409,33 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="서버 내부 오류가 발생했습니다."
         )
+    
+
+
+class ShareResponse(BaseModel):
+    share_url: str
+
+@router.get(
+    "/api/travelogue/{travelogue_id}/share",
+    status_code=status.HTTP_200_OK,
+    response_model=ShareResponse,
+    summary="여행기 PDF 공유 링크 발급",
+    description="GCS에 저장된 여행기 PDF의 다운로드 링크를 반환합니다."
+)
+async def share_travelogue_pdf(travelogue_id: int):
+    file_name = f"exports/travelogue_{travelogue_id}.pdf"
+    blob = bucket.blob(file_name)
+
+    if not blob.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"PDF 파일이 존재하지 않습니다: {file_name}"
+        )
+
+    share_url = blob.generate_signed_url(
+        version="v4",
+        expiration=3600,
+        method="GET"
+    )
+
+    return {"share_url": share_url}
