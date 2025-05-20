@@ -221,10 +221,10 @@ async def select_second_image(
                         lon = -lon
                     location_str = reverse_geocode(lat, lon)
                 else:
-                    location_str = "정보 없음"
+                    location_str = None
             except Exception:
                 created_at = None
-                location_str = "정보 없음"
+                location_str = None
 
 
             # 기존 Metadata 조회
