@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, asc
 from gcs_utils import upload_image_to_gcs, delete_image_from_gcs, generate_signed_url
 import requests
+import asyncio
 
 router = APIRouter()
 
@@ -129,27 +130,54 @@ async def create_image(db: db_dependency, travelogue_id: int = Form(...), images
         result_mapping = []
         result_image = []
         uploaded_files = []
+
+        # 1. 파일 읽기(비동기) & 업로드 태스크 생성
+        upload_tasks = []
+        file_bytes_list = []
+        file_name_list = []
+
         for i, image in enumerate(images, start=1):
             file_name = f"{travelogue_id}_{i}.jpg"
             file_bytes = await image.read()
-            uri = await upload_image_to_gcs(file_bytes, file_name, content_type=image.content_type)
-            uploaded_files.append(file_name)
+            file_bytes_list.append(file_bytes)
+            file_name_list.append(file_name)
+            upload_tasks.append(
+                upload_image_to_gcs(file_bytes, file_name, content_type=image.content_type)
+            )
 
-            image = Image(
+        # 2. 병렬 업로드 실행
+        upload_results = await asyncio.gather(*upload_tasks, return_exceptions=True)
+
+        # 3. 업로드 결과 처리 및 DB 저장
+        for i, (uri, file_name, file_bytes) in enumerate(zip(upload_results, file_name_list, file_bytes_list), start=1):
+            if isinstance(uri, Exception):
+                # 업로드 실패시 롤백 및 정리
+                for fn in uploaded_files:
+                    delete_image_from_gcs(fn)
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"GCS upload failed: {str(uri)}"
+                )
+
+            uploaded_files.append(file_name)
+            print(file_name, "Uploaded")
+
+            image_obj = Image(
                 travelogue_image_id=i,
                 uri=uri,
                 is_in_travelogue=True
             )
-            db.add(image)
+            db.add(image_obj)
             db.flush()
 
             mapping = TravelogueImage(
                 travelogue_id=travelogue_id,
-                image_id=image.id
+                image_id=image_obj.id
             )
             db.add(mapping)
 
-            result_image.append(image)
+            result_image.append(image_obj)
             result_mapping.append(mapping)
         db.commit()
         return {"mapping_list": result_mapping, "image_list": result_image}
