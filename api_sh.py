@@ -452,3 +452,43 @@ async def share_travelogue_pdf(travelogue_id: int):
     )
 
     return {"share_url": share_url}
+
+
+class ImageOrderRequest(BaseModel):
+    image_ids: List[int]
+
+class ImageOrderResponse(BaseModel):
+    image_ids: List[int]
+
+@router.post(
+    "/api/travelogue/images/timeorder",
+    status_code=status.HTTP_200_OK,
+    response_model=ImageOrderResponse,
+    summary="이미지 촬영시간순 정렬",
+    description="image_ids 리스트를 촬영시간순으로 정렬해 반환합니다."
+)
+async def order_images_by_time(
+    request: ImageOrderRequest,
+    db: Session = Depends(get_db)
+):
+
+    images = db.query(Image).filter(Image.id.in_(request.image_ids)).all()
+    if not images:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="지정한 이미지를 찾을 수 없습니다."
+        )
+    
+    created_at_map = {}
+    for img in images:
+        try:
+            created_at_map[img.id] = extract_created_at_from_gcs(img.uri)
+        except Exception:
+            created_at_map[img.id] = None
+
+    ordered_ids = sorted(
+        request.image_ids,
+        key=lambda x: (created_at_map.get(x) is None, created_at_map.get(x))
+    )
+
+    return {"image_ids": ordered_ids}
