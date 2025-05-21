@@ -167,12 +167,22 @@ async def select_second_image(
 
     try:
         if image_ids:
-            db.query(Image).filter(Image.id.in_(image_ids)).update(
-                {Image.is_in_travelogue: False},
-                synchronize_session=False
-            )
-            db.commit()
-            db.expire_all()
+            images_to_update = db.query(Image).filter(Image.id.in_(image_ids)).all()
+            if not images_to_update:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"해당 image_ids에 해당하는 이미지가 없습니다."
+                )
+            for img in images_to_update:
+                img.is_in_travelogue = False
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"이미지 비활성화 중 오류 발생: {str(e)}"
+                )
 
         mappings = db.query(TravelogueImage).filter(
             TravelogueImage.travelogue_id == travelogue_id
