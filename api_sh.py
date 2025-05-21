@@ -128,6 +128,9 @@ class CaptionMetadataResponse(BaseModel):
     caption_list: List[CaptionResponse]
     metadata_list: List[MetadataResponse]
 
+class ImageIdsRequest(BaseModel):
+    image_ids: Optional[List[int]] = None
+
 
 def convert_to_degrees(value):
     d = float(value.values[0].num) / float(value.values[0].den)
@@ -159,9 +162,10 @@ def reverse_geocode(lat: float, lon: float) -> str:
 )
 async def select_second_image(
     travelogue_id: int,
-    image_ids: Optional[List[int]] = Query(None),
+    request: ImageIdsRequest,
     db: Session = Depends(get_db)
 ):
+    image_ids = request.image_ids
     caption_list = []
     metadata_list = []
 
@@ -452,3 +456,47 @@ async def share_travelogue_pdf(travelogue_id: int):
     )
 
     return {"share_url": share_url}
+
+
+class ImageOrderResponse(BaseModel):
+    image_ids: List[int]
+
+@router.get(
+    "/api/images/timeorder",
+    status_code=status.HTTP_200_OK,
+    response_model=ImageOrderResponse,
+    summary="이미지 촬영시간순 정렬",
+    description="image_ids 리스트를 촬영시간순으로 정렬해 반환합니다."
+)
+async def order_images_by_time(
+    image_ids: List[int] = Query(..., description="정렬할 이미지 id 리스트"),
+    db: Session = Depends(get_db)
+):
+    try:
+        images = db.query(Image).filter(Image.id.in_(image_ids)).all()
+        if not images:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="지정한 이미지를 찾을 수 없습니다."
+            )
+        
+        created_at_map = {}
+        for img in images:
+            try:
+                created_at_map[img.id] = extract_created_at_from_gcs(img.uri)
+            except Exception:
+                created_at_map[img.id] = None
+
+        ordered_ids = sorted(
+            image_ids,
+            key=lambda x: (created_at_map.get(x) is None, created_at_map.get(x))
+        )
+
+        return {"image_ids": ordered_ids}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"서버 내부 오류: {str(e)}"
+        )
