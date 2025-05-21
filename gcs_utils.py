@@ -48,7 +48,7 @@ def delete_image_from_gcs(file_name: str) -> bool:
     else:
         return False
     
-def generate_signed_url(image_uri: str, expiration: int = 300) -> str:
+def generate_signed_url(image_uri: str, expiration: int = 3600) -> str:
     file_name = image_uri.split(f"gs://{BUCKET_NAME}/")[-1]
     print(file_name)
     blob = bucket.blob(file_name)
