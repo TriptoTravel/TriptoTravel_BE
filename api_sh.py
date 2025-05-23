@@ -291,7 +291,6 @@ async def select_second_image(
     
 
 load_dotenv()
-router = APIRouter()
 
 def correct_image_orientation(pil_img):
     try:
