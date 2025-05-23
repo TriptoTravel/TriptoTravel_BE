@@ -21,8 +21,9 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ExifTags
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 router = APIRouter()
@@ -290,6 +291,47 @@ async def select_second_image(
     
 
 load_dotenv()
+router = APIRouter()
+
+def correct_image_orientation(pil_img):
+    try:
+        exif = pil_img._getexif()
+        if exif is not None:
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+            orientation_value = exif.get(orientation, None)
+            if orientation_value == 3:
+                pil_img = pil_img.rotate(180, expand=True)
+            elif orientation_value == 6:
+                pil_img = pil_img.rotate(270, expand=True)
+            elif orientation_value == 8:
+                pil_img = pil_img.rotate(90, expand=True)
+    except Exception:
+        pass
+    return pil_img
+
+def resize_for_pdf(pil_img, max_width_pt, max_height_pt, dpi=150, scale=1.1):
+    max_width_px = int(max_width_pt * dpi / 72 * scale)
+    max_height_px = int(max_height_pt * dpi / 72 * scale)
+    orig_width, orig_height = pil_img.size
+    ratio = min(max_width_px / orig_width, max_height_px / orig_height, 1.0)
+    new_size = (int(orig_width * ratio), int(orig_height * ratio))
+    return pil_img.resize(new_size, PILImage.LANCZOS)
+
+def download_and_prepare_image(img, max_width_pt, max_height_pt, dpi=150, scale=1.1):
+    file_name = extract_gcs_file_name(img.uri)
+    blob = bucket.blob(file_name)
+    if not blob.exists():
+        return None, None, None
+    image_bytes = blob.download_as_bytes()
+    stream = io.BytesIO(image_bytes)
+    pil_img = PILImage.open(stream)
+    pil_img = correct_image_orientation(pil_img)
+    pil_img = pil_img.convert("RGB")
+    pil_img = resize_for_pdf(pil_img, max_width_pt, max_height_pt, dpi=dpi, scale=scale)
+    img_width, img_height = pil_img.size
+    return img, pil_img, (img_width, img_height)
 
 @router.get(
     "/api/travelogue/{travelogue_id}/export",
@@ -353,23 +395,33 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
         buffer = io.BytesIO()
         p = canvas.Canvas(buffer, pagesize=letter)
         width, height = letter
+        max_img_width = width * 0.8
+        max_img_height = height * 0.5
 
-        for item in images_with_dates:
-            img = item["img"]
-            file_name = extract_gcs_file_name(img.uri)
-            blob = bucket.blob(file_name)
-            image_bytes = blob.download_as_bytes()
-            image_stream = io.BytesIO(image_bytes)
-            image_reader = ImageReader(image_stream)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_img = {
+                executor.submit(download_and_prepare_image, item["img"], max_img_width, max_img_height): item
+                for item in images_with_dates
+            }
+            processed_images = []
+            for future in as_completed(future_to_img):
+                img, pil_img, (img_width, img_height) = future.result()
+                if img and pil_img:
+                    processed_images.append((img, pil_img, img_width, img_height))
 
-            image_stream.seek(0)
-            pil_img = PILImage.open(image_stream)
-            orig_width, orig_height = pil_img.size
-            max_img_width = width * 0.8
-            if orig_width > max_img_width:
-                ratio = max_img_width / orig_width
-                orig_width = int(orig_width * ratio)
-                orig_height = int(orig_height * ratio)
+        processed_images.sort(
+            key=lambda x: (
+                next((item["created_at"] for item in images_with_dates if item["img"] == x[0]), None) is None,
+                next((item["created_at"] for item in images_with_dates if item["img"] == x[0]), None)
+            )
+        )
+
+        for img, pil_img, img_width, img_height in processed_images:
+            image_reader = ImageReader(pil_img)
+
+            ratio = min(max_img_width / img_width, max_img_height / img_height, 1.0)
+            draw_width = int(img_width * ratio)
+            draw_height = int(img_height * ratio)
 
             final_text = img.final if img.final is not None else ""
             font_size = 12
@@ -389,12 +441,12 @@ async def export_travelogue(travelogue_id: int, db: Session = Depends(get_db)):
                 wrapped_lines.append(line)
 
             text_block_height = len(wrapped_lines) * (font_size + line_spacing) if wrapped_lines else 0
-            block_height = orig_height + (30 if wrapped_lines else 0) + text_block_height
+            block_height = draw_height + (30 if wrapped_lines else 0) + text_block_height
             y_block = (height - block_height) / 2
-            x = (width - orig_width) / 2
+            x = (width - draw_width) / 2
             y = y_block + text_block_height + (30 if wrapped_lines else 0)
 
-            p.drawImage(image_reader, x, y, width=orig_width, height=orig_height)
+            p.drawImage(image_reader, x, y, width=draw_width, height=draw_height)
 
             if wrapped_lines:
                 max_line_width = max(p.stringWidth(line, font_name, font_size) for line in wrapped_lines)
