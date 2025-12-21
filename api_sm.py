@@ -485,7 +485,7 @@ async def execute_first_selection(db: db_dependency, image_num: int, travelogue_
             "purpose": purpose_list
         }
 
-        ai_server = "http://34.64.172.167:8000/select-primary-image"
+        ai_server = "http://34.138.200.173:8000/select-primary-image"
         ai_response_data = requests.get(
             ai_server,
             headers={"Content-Type": "application/json"},
@@ -590,7 +590,7 @@ async def execute_travelogue_generation(db: db_dependency, travelogue_id: int):
             ]
         }
         print(ai_request_data)
-        ai_server = "http://34.64.172.167:8000/generate-travel-log" # ai_server endpoint
+        ai_server = "http://34.138.200.173:8000/generate-travel-log" # ai_server endpoint
         ai_response_data = requests.get(
             ai_server,
             json=ai_request_data
